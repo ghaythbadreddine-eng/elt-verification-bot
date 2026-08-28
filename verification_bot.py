@@ -47,6 +47,7 @@ EXTRA_ROLES_ON_VERIFY = [1513904151309058159]  # MEMBER role - given alongside V
 intents = discord.Intents.default()
 intents.members = True
 intents.voice_states = True  # needed to detect members joining the voice channel
+intents.message_content = True  # ensure message content intent is enabled
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -139,12 +140,25 @@ class VerifyView(discord.ui.View):
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
+    print(f"📋 Intents enabled: members={bot.intents.members}, voice_states={bot.intents.voice_states}, message_content={bot.intents.message_content}")
+    guild = bot.get_guild(GUILD_ID)
+    if guild:
+        print(f"✅ Connected to guild: {guild.name}")
+        vc = guild.get_channel(WAITING_VC_ID)
+        print(f"📌 Voice channel found: {vc.name if vc else 'NOT FOUND'}")
+        tc = guild.get_channel(VERIFICATION_CHANNEL_ID)
+        print(f"📌 Verification channel found: {tc.name if tc else 'NOT FOUND'}")
+    else:
+        print(f"❌ Guild {GUILD_ID} not found!")
 
 
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     """Notifies Staff and Admin when a member joins the 'Waiting for Move' voice channel."""
+    print(f"🔊 Voice state update: {member} | Before: {before.channel} | After: {after.channel}")
+    
     if member.guild.id != GUILD_ID:
+        print(f"❌ Wrong guild")
         return
 
     just_joined_waiting = (
@@ -153,18 +167,25 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         and (before.channel is None or before.channel.id != WAITING_VC_ID)
     )
     if not just_joined_waiting:
+        print(f"❌ Not joining waiting channel")
         return
+
+    print(f"✅ {member} joined waiting channel!")
 
     verified_role = member.guild.get_role(VERIFIED_ROLE_ID)
     if verified_role and verified_role in member.roles:
+        print(f"❌ Already verified")
         return  # already verified
     if member.id in pending_verification:
+        print(f"❌ Already has pending notification")
         return  # already has a pending notification
 
     verification_channel = member.guild.get_channel(VERIFICATION_CHANNEL_ID)
     if verification_channel is None:
         print("⚠️ Couldn't find the verification channel — check VERIFICATION_CHANNEL_ID")
         return
+
+    print(f"📤 Sending verification message for {member}")
 
     embed = discord.Embed(
         title="Member awaiting verification",
