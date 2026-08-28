@@ -19,6 +19,7 @@ Before running:
 """
 
 import os
+import asyncio
 
 import discord
 from discord.ext import commands
@@ -63,6 +64,27 @@ def is_staff_or_admin(member: discord.Member) -> bool:
         or ADMIN_ROLE_ID in role_ids
         or member.guild_permissions.administrator
     )
+
+
+async def send_with_retry(channel, **kwargs):
+    """Send a message with exponential backoff retry logic for rate limits."""
+    max_attempts = 5
+    backoff_delays = [1, 2, 4, 8, 16]  # seconds
+    
+    for attempt in range(max_attempts):
+        try:
+            return await channel.send(**kwargs)
+        except discord.errors.HTTPException as e:
+            if e.status == 429:  # Rate limited
+                if attempt < max_attempts - 1:
+                    delay = backoff_delays[attempt]
+                    print(f"⏳ Rate limited, retrying in {delay}s (attempt {attempt + 1}/{max_attempts})")
+                    await asyncio.sleep(delay)
+                else:
+                    print(f"❌ Failed to send message after {max_attempts} attempts")
+                    raise
+            else:
+                raise
 
 
 class VerifyView(discord.ui.View):
@@ -155,10 +177,7 @@ async def on_ready():
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     """Notifies Staff and Admin when a member joins the 'Waiting for Move' voice channel."""
-    print(f"🔊 Voice state update: {member} | Before: {before.channel} | After: {after.channel}")
-    
     if member.guild.id != GUILD_ID:
-        print(f"❌ Wrong guild")
         return
 
     just_joined_waiting = (
@@ -167,17 +186,12 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         and (before.channel is None or before.channel.id != WAITING_VC_ID)
     )
     if not just_joined_waiting:
-        print(f"❌ Not joining waiting channel")
         return
-
-    print(f"✅ {member} joined waiting channel!")
 
     verified_role = member.guild.get_role(VERIFIED_ROLE_ID)
     if verified_role and verified_role in member.roles:
-        print(f"❌ Already verified")
         return  # already verified
     if member.id in pending_verification:
-        print(f"❌ Already has pending notification")
         return  # already has a pending notification
 
     verification_channel = member.guild.get_channel(VERIFICATION_CHANNEL_ID)
@@ -202,12 +216,19 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 
     view = VerifyView(member.id)
     pending_verification.add(member.id)
-    await verification_channel.send(
-        content="@everyone A member in the voice channel needs verification",
-        embed=embed,
-        view=view,
-        allowed_mentions=discord.AllowedMentions(everyone=True),
-    )
+    
+    try:
+        await send_with_retry(
+            verification_channel,
+            content="@everyone A member in the voice channel needs verification",
+            embed=embed,
+            view=view,
+            allowed_mentions=discord.AllowedMentions(everyone=True),
+        )
+        print(f"✅ Verification message sent for {member}")
+    except Exception as e:
+        print(f"❌ Failed to send verification message: {e}")
+        pending_verification.discard(member.id)
 
 
 if not TOKEN:
