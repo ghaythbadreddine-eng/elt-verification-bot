@@ -78,10 +78,13 @@ class VerifyView(discord.ui.View):
         if not is_staff_or_admin(interaction.user):
             return await interaction.response.send_message("You don't have permission to verify members.", ephemeral=True)
 
+        # Defer first to prevent timeout
+        await interaction.response.defer()
+
         guild = interaction.guild
         member = guild.get_member(self.member_id)
         if member is None:
-            return await interaction.response.send_message("That member isn't in the server anymore (they may have left).", ephemeral=True)
+            return await interaction.followup.send("That member isn't in the server anymore (they may have left).", ephemeral=True)
 
         unverified_role = guild.get_role(UNVERIFIED_ROLE_ID)
         verified_role = guild.get_role(VERIFIED_ROLE_ID)
@@ -96,7 +99,7 @@ class VerifyView(discord.ui.View):
                 if r:
                     await member.add_roles(r, reason="Extra role after verification")
         except discord.Forbidden:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "The bot doesn't have enough permission to change roles (make sure the bot's role is above the roles it manages).",
                 ephemeral=True,
             )
@@ -108,7 +111,7 @@ class VerifyView(discord.ui.View):
         embed.set_footer(text=f"Verified ✅ by {interaction.user}")
         for item in self.children:
             item.disabled = True
-        await interaction.response.edit_message(embed=embed, view=self)
+        await interaction.followup.edit_message(interaction.message.id, embed=embed, view=self)
 
         if WELCOME_CHANNEL_ID:
             welcome_channel = guild.get_channel(WELCOME_CHANNEL_ID)
@@ -120,6 +123,9 @@ class VerifyView(discord.ui.View):
         if not is_staff_or_admin(interaction.user):
             return await interaction.response.send_message("You don't have permission.", ephemeral=True)
 
+        # Defer first to prevent timeout
+        await interaction.response.defer()
+
         pending_verification.discard(self.member_id)
 
         embed = interaction.message.embeds[0]
@@ -127,7 +133,7 @@ class VerifyView(discord.ui.View):
         embed.set_footer(text=f"Rejected ❌ by {interaction.user}")
         for item in self.children:
             item.disabled = True
-        await interaction.response.edit_message(embed=embed, view=self)
+        await interaction.followup.edit_message(interaction.message.id, embed=embed, view=self)
 
 
 @bot.event
@@ -187,3 +193,4 @@ if not TOKEN:
     raise SystemExit("DISCORD_TOKEN is not set. Add it in Railway's Variables tab, then redeploy.")
 
 bot.run(TOKEN)
+
