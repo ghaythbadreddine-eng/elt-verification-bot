@@ -19,6 +19,7 @@ Before running:
 """
 
 import os
+import asyncio
 
 import discord
 from discord.ext import commands
@@ -137,6 +138,43 @@ class VerifyView(discord.ui.View):
         await interaction.followup.edit_message(interaction.message.id, embed=embed, view=self)
 
 
+async def send_verification_message_with_retry(verification_channel, embed, view, member):
+    """Send a message with exponential backoff retry for rate limits."""
+    max_retries = 5
+    base_delay = 1  # Start with 1 second
+    
+    for attempt in range(max_retries):
+        try:
+            await verification_channel.send(
+                content="@everyone A member in the voice channel needs verification",
+                embed=embed,
+                view=view,
+                allowed_mentions=discord.AllowedMentions(everyone=True),
+            )
+            print(f"✅ Verification message sent successfully for {member}")
+            return True
+        except discord.errors.HTTPException as e:
+            if e.status == 429:  # Rate limited
+                if attempt < max_retries - 1:
+                    wait_time = base_delay * (2 ** attempt)  # Exponential backoff
+                    print(f"⏳ Rate limited. Retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(wait_time)
+                else:
+                    print(f"❌ Failed to send verification message after {max_retries} retries: {e}")
+                    pending_verification.discard(member.id)
+                    return False
+            else:
+                print(f"❌ Failed to send verification message: {e}")
+                pending_verification.discard(member.id)
+                return False
+        except Exception as e:
+            print(f"❌ Unexpected error sending verification message: {e}")
+            pending_verification.discard(member.id)
+            return False
+    
+    return False
+
+
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
@@ -202,12 +240,11 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 
     view = VerifyView(member.id)
     pending_verification.add(member.id)
-    await verification_channel.send(
-        content="@everyone A member in the voice channel needs verification",
-        embed=embed,
-        view=view,
-        allowed_mentions=discord.AllowedMentions(everyone=True),
-    )
+    
+    # Use the new retry function instead of direct send
+    success = await send_verification_message_with_retry(verification_channel, embed, view, member)
+    if not success:
+        pending_verification.discard(member.id)
 
 
 if not TOKEN:
