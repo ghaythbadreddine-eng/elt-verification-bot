@@ -1,6 +1,3 @@
-[build]
-cmd = "pip install -r requirements.txt"
-
 [deploy]
-cmd = "python 'verification_bot (1).py'"
+cmd = ["python", "verification_bot (1).py"]
 
