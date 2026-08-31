@@ -52,10 +52,6 @@ intents.message_content = True  # ensure message content intent is enabled
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Tracks members we've already notified, so we don't repeat it if they leave and rejoin the channel
-# (resets automatically if the bot restarts)
-pending_verification = set()
-
 
 def is_staff_or_admin(member: discord.Member) -> bool:
     role_ids = {role.id for role in member.roles}
@@ -127,8 +123,6 @@ class VerifyView(discord.ui.View):
                 ephemeral=True,
             )
 
-        pending_verification.discard(self.member_id)
-
         embed = interaction.message.embeds[0]
         embed.color = discord.Color.green()
         embed.set_footer(text=f"Verified ✅ by {interaction.user}")
@@ -149,8 +143,6 @@ class VerifyView(discord.ui.View):
         # Defer first to prevent timeout
         await interaction.response.defer()
 
-        pending_verification.discard(self.member_id)
-
         embed = interaction.message.embeds[0]
         embed.color = discord.Color.red()
         embed.set_footer(text=f"Rejected ❌ by {interaction.user}")
@@ -162,21 +154,11 @@ class VerifyView(discord.ui.View):
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
-    print(f"📋 Intents enabled: members={bot.intents.members}, voice_states={bot.intents.voice_states}, message_content={bot.intents.message_content}")
-    guild = bot.get_guild(GUILD_ID)
-    if guild:
-        print(f"✅ Connected to guild: {guild.name}")
-        vc = guild.get_channel(WAITING_VC_ID)
-        print(f"📌 Voice channel found: {vc.name if vc else 'NOT FOUND'}")
-        tc = guild.get_channel(VERIFICATION_CHANNEL_ID)
-        print(f"📌 Verification channel found: {tc.name if tc else 'NOT FOUND'}")
-    else:
-        print(f"❌ Guild {GUILD_ID} not found!")
 
 
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
-    """Notifies Staff and Admin when a member joins the 'Waiting for Move' voice channel."""
+    """Notifies Staff and Admin when a member joins the 'Waiting for Move' voice channel. Posts every time, even for duplicate joins."""
     if member.guild.id != GUILD_ID:
         return
 
@@ -188,11 +170,10 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
     if not just_joined_waiting:
         return
 
+    # Skip if already verified
     verified_role = member.guild.get_role(VERIFIED_ROLE_ID)
     if verified_role and verified_role in member.roles:
-        return  # already verified
-    if member.id in pending_verification:
-        return  # already has a pending notification
+        return
 
     verification_channel = member.guild.get_channel(VERIFICATION_CHANNEL_ID)
     if verification_channel is None:
@@ -215,7 +196,6 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
     embed.set_footer(text="Click Verify to let this member in")
 
     view = VerifyView(member.id)
-    pending_verification.add(member.id)
     
     try:
         await send_with_retry(
@@ -228,7 +208,6 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         print(f"✅ Verification message sent for {member}")
     except Exception as e:
         print(f"❌ Failed to send verification message: {e}")
-        pending_verification.discard(member.id)
 
 
 if not TOKEN:
