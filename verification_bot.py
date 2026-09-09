@@ -4,8 +4,8 @@ Discord Verification Bot
 How it works:
 1) When a member joins the "Waiting for Move" voice channel:
    - The bot posts an embed in the "VERIFICATION" text channel, pinging @everyone,
-     with a Verify button and a Reject button. Only Staff/Admin can actually click the buttons.
-2) When a Staff/Admin member clicks Verify:
+     with a Verify button and a Reject button. Anyone can click the buttons.
+2) When anyone clicks Verify:
    - The "Verified" role and "Member" role (or any other roles you set) get added.
    - If the member already has the "Unverified" role, it gets removed.
    - An optional welcome message is sent in the welcome channel (if you set one up).
@@ -39,8 +39,6 @@ WAITING_VC_ID = 1513904254535073883              # the "Waiting for Move" voice 
 # Roles
 UNVERIFIED_ROLE_ID = 1513904174079934657  # removed from the member at verify time if they have it (not given automatically anymore)
 VERIFIED_ROLE_ID = 1513904156350353511    # given after verification
-STAFF_ROLE_ID = 1513904127837736992       # pinged in the notification, can click the buttons
-ADMIN_ROLE_ID = 1513904120803889243       # pinged in the notification, can click the buttons
 
 EXTRA_ROLES_ON_VERIFY = [1513904151309058159]  # MEMBER role - given alongside Verified
 # ================================================================
@@ -51,15 +49,6 @@ intents.voice_states = True  # needed to detect members joining the voice channe
 intents.message_content = True  # ensure message content intent is enabled
 
 bot = commands.Bot(command_prefix="!", intents=intents)
-
-
-def is_staff_or_admin(member: discord.Member) -> bool:
-    role_ids = {role.id for role in member.roles}
-    return (
-        STAFF_ROLE_ID in role_ids
-        or ADMIN_ROLE_ID in role_ids
-        or member.guild_permissions.administrator
-    )
 
 
 async def send_with_retry(channel, **kwargs):
@@ -94,9 +83,6 @@ class VerifyView(discord.ui.View):
 
     @discord.ui.button(label="✅ Verify", style=discord.ButtonStyle.success)
     async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not is_staff_or_admin(interaction.user):
-            return await interaction.response.send_message("You don't have permission to verify members.", ephemeral=True)
-
         # Defer first to prevent timeout
         await interaction.response.defer()
 
@@ -137,9 +123,6 @@ class VerifyView(discord.ui.View):
 
     @discord.ui.button(label="❌ Reject", style=discord.ButtonStyle.danger)
     async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not is_staff_or_admin(interaction.user):
-            return await interaction.response.send_message("You don't have permission.", ephemeral=True)
-
         # Defer first to prevent timeout
         await interaction.response.defer()
 
