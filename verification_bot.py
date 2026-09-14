@@ -5,6 +5,7 @@ How it works:
 1) When a member joins the "Waiting for Move" voice channel:
    - The bot posts an embed in the "VERIFICATION" text channel, pinging @everyone,
      with a Verify button and a Reject button. Anyone can click the buttons.
+   - Shows who invited the member if available.
 2) When anyone clicks Verify:
    - The "Verified" role and "Member" role (or any other roles you set) get added.
    - If the member already has the "Unverified" role, it gets removed.
@@ -47,8 +48,23 @@ intents = discord.Intents.default()
 intents.members = True
 intents.voice_states = True  # needed to detect members joining the voice channel
 intents.message_content = True  # ensure message content intent is enabled
+intents.invites = True  # needed to track invites
 
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+# Invite tracking
+invite_cache = {}  # {guild_id: {invite_code: use_count}}
+member_inviters = {}  # {member_id: inviter_user_object}
+
+
+async def cache_invites(guild: discord.Guild):
+    """Cache all invites for a guild and their use counts."""
+    try:
+        invites = await guild.invites()
+        invite_cache[guild.id] = {invite.code: invite.uses for invite in invites}
+        print(f"✅ Cached {len(invites)} invites for guild {guild.id}")
+    except discord.Forbidden:
+        print(f"⚠️ Bot doesn't have permission to view invites in guild {guild.id}")
 
 
 async def send_with_retry(channel, **kwargs):
@@ -137,11 +153,70 @@ class VerifyView(discord.ui.View):
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
+    # Cache invites for the guild when bot starts
+    guild = bot.get_guild(GUILD_ID)
+    if guild:
+        await cache_invites(guild)
+    else:
+        print(f"❌ Guild {GUILD_ID} not found!")
+
+
+@bot.event
+async def on_invite_create(invite: discord.Invite):
+    """Refresh invite cache when a new invite is created."""
+    if invite.guild.id == GUILD_ID:
+        await cache_invites(invite.guild)
+        print(f"📝 Invite created: {invite.code}")
+
+
+@bot.event
+async def on_invite_delete(invite: discord.Invite):
+    """Refresh invite cache when an invite is deleted."""
+    if invite.guild.id == GUILD_ID:
+        await cache_invites(invite.guild)
+        print(f"🗑️ Invite deleted: {invite.code}")
+
+
+@bot.event
+async def on_member_join(member: discord.Member):
+    """Track who invited the member by comparing invite use counts."""
+    if member.guild.id != GUILD_ID:
+        return
+    
+    print(f"➕ {member} joined the server")
+    
+    # Give bot a second to see the updated invites
+    await asyncio.sleep(1)
+    
+    try:
+        current_invites = await member.guild.invites()
+        old_cache = invite_cache.get(member.guild.id, {})
+        
+        inviter = None
+        for invite in current_invites:
+            old_uses = old_cache.get(invite.code, 0)
+            if invite.uses > old_uses:
+                # This invite was used
+                inviter = invite.inviter
+                print(f"👤 {member} was invited by {inviter}")
+                break
+        
+        if inviter:
+            member_inviters[member.id] = inviter
+        else:
+            # Could be vanity URL or invite info not available
+            print(f"❓ {member} joined via unknown invite (possibly vanity URL)")
+            member_inviters[member.id] = None
+        
+        # Update cache
+        await cache_invites(member.guild)
+    except discord.Forbidden:
+        print(f"⚠️ Bot doesn't have permission to view invites")
 
 
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
-    """Notifies Staff and Admin when a member joins the 'Waiting for Move' voice channel. Posts every time, even for duplicate joins."""
+    """Notifies when a member joins the 'Waiting for Move' voice channel. Posts every time, even for duplicate joins."""
     if member.guild.id != GUILD_ID:
         return
 
@@ -165,12 +240,18 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 
     print(f"📤 Sending verification message for {member}")
 
+    # Build description with invite info if available
+    inviter = member_inviters.get(member.id)
+    invited_by_text = f"Invited by: {inviter.mention}" if inviter else "Invited by: Unknown (vanity URL or unknown invite)"
+    
     embed = discord.Embed(
         title="Member awaiting verification",
         description=(
             f"Member: {member.mention}\n"
             f"ID: `{member.id}`\n"
             f"Account created: {discord.utils.format_dt(member.created_at, 'R')}\n"
+            f"Joined server: {discord.utils.format_dt(member.joined_at, 'R')}\n"
+            f"{invited_by_text}\n"
             f"Joined voice channel: **{after.channel.name}**"
         ),
         color=discord.Color.gold(),
